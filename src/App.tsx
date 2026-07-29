@@ -27,12 +27,12 @@ export default function App() {
   const [notice, setNotice] = useState<string | null>(initialLoad.notice)
 
   useEffect(() => {
-    const result = saveAppState(state)
+    const result = saveAppState(state, initialLoad.canPersist)
     if (!result.ok) {
       const timeout = window.setTimeout(() => setNotice(result.notice), 0)
       return () => window.clearTimeout(timeout)
     }
-  }, [state])
+  }, [initialLoad.canPersist, state])
 
   const activeBracket =
     'bracketId' in view

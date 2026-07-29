@@ -1,5 +1,5 @@
-import { describe, expect, it } from 'vitest'
-import { loadAppStateFromStorage } from './appStorage'
+import { describe, expect, it, vi } from 'vitest'
+import { loadAppState, loadAppStateFromStorage, saveAppState } from './appStorage'
 
 describe('app storage recovery', () => {
   it('returns an empty library for malformed JSON', () => {
@@ -45,6 +45,27 @@ describe('app storage recovery', () => {
 
     expect(result.state.brackets).toEqual([])
     expect(result.notice).not.toBeNull()
+  })
+
+  it('preserves an unsupported payload throughout the incompatible session', () => {
+    const futurePayload = JSON.stringify({ version: 99, data: { brackets: ['future-data'] } })
+    let storedValue = futurePayload
+    vi.stubGlobal('window', {
+      localStorage: {
+        getItem: () => storedValue,
+        setItem: (_key: string, value: string) => {
+          storedValue = value
+        },
+      },
+    })
+
+    const initialLoad = loadAppState()
+    saveAppState(initialLoad.state, initialLoad.canPersist)
+    saveAppState({ brackets: [] }, initialLoad.canPersist)
+
+    const storedAfterSaves = storedValue
+    vi.unstubAllGlobals()
+    expect(storedAfterSaves).toBe(futurePayload)
   })
 })
 

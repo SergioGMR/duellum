@@ -16,6 +16,7 @@ interface StorageEnvelope {
 export interface LoadStateResult {
   state: AppState
   notice: string | null
+  canPersist: boolean
 }
 
 export interface SaveStateResult {
@@ -31,11 +32,15 @@ export function loadAppState(): LoadStateResult {
       state: EMPTY_APP_STATE,
       notice:
         'El almacenamiento local no está disponible. Los cambios solo se conservarán durante esta visita.',
+      canPersist: true,
     }
   }
 }
 
-export function saveAppState(state: AppState): SaveStateResult {
+export function saveAppState(state: AppState, canPersist: boolean): SaveStateResult {
+  if (!canPersist) {
+    return { ok: true, notice: null }
+  }
   try {
     const envelope: StorageEnvelope = {
       version: STORAGE_VERSION,
@@ -61,22 +66,29 @@ export function loadAppStateFromStorage(storage: Pick<Storage, 'getItem'>): Load
       state: EMPTY_APP_STATE,
       notice:
         'El almacenamiento local no está disponible. Los cambios solo se conservarán durante esta visita.',
+      canPersist: true,
     }
   }
 
   if (rawValue === null) {
-    return { state: EMPTY_APP_STATE, notice: null }
+    return { state: EMPTY_APP_STATE, notice: null, canPersist: true }
   }
 
   try {
     const value: unknown = JSON.parse(rawValue)
-    if (!isRecord(value) || value.version !== STORAGE_VERSION || !isRecord(value.data)) {
-      return recoveredEmptyState()
+    if (!isRecord(value)) {
+      return recoveredEmptyState(true)
+    }
+    if (typeof value.version === 'number' && value.version !== STORAGE_VERSION) {
+      return recoveredEmptyState(false)
+    }
+    if (value.version !== STORAGE_VERSION || !isRecord(value.data)) {
+      return recoveredEmptyState(true)
     }
 
     const rawBrackets = value.data.brackets
     if (!Array.isArray(rawBrackets)) {
-      return recoveredEmptyState()
+      return recoveredEmptyState(true)
     }
 
     const brackets: DecisionBracket[] = []
@@ -99,9 +111,10 @@ export function loadAppStateFromStorage(storage: Pick<Storage, 'getItem'>): Load
       notice: recovered
         ? 'Parte del progreso guardado era incompatible y se reinició de forma segura.'
         : null,
+      canPersist: true,
     }
   } catch {
-    return recoveredEmptyState()
+    return recoveredEmptyState(true)
   }
 }
 
@@ -202,10 +215,11 @@ function parseRun(value: unknown): TournamentRun | null {
   }
 }
 
-function recoveredEmptyState(): LoadStateResult {
+function recoveredEmptyState(canPersist: boolean): LoadStateResult {
   return {
     state: EMPTY_APP_STATE,
     notice: 'No se pudieron leer los datos guardados. Duellum se inició con una biblioteca vacía.',
+    canPersist,
   }
 }
 
