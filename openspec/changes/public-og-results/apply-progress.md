@@ -154,8 +154,15 @@
 ### U3a-C Review Budget
 - One feature-branch-chain correction work unit; no dependency, lockfile, or generated-asset changes. Its rollback is limited to coverage and the listed call-site/test lines; the preserved dirty baseline is outside this review slice.
 
+## Vercel Deployment Correction
+- First automatic production deployment from `37251a2` reached the build and failed because pnpm 11 ignored the transitive `sharp@0.34.5` install script (`ERR_PNPM_IGNORED_BUILDS`).
+- Added root `pnpm-workspace.yaml` with `allowBuilds.sharp: true`; `pnpm install --frozen-lockfile` and the full check pass locally.
+- The next deployment reached the Edge bundle but exceeded the Hobby 1 MB limit at 1.13 MB because the two full Inter TTFs were bundled. Replaced them with exact curated Latin/punctuation subsets while retaining cmap-derived coverage rejection and no remote fallback.
+- New asset proof: `Inter-Regular.ttf` 189,664 bytes, SHA-256 `a36932026a9def9774fd9cab8a26c36b03aa2989adb549ba68e88d0f4769de83`; `Inter-Black.ttf` 192,240 bytes, SHA-256 `2281ecc1ecc64a63d7e20ac365692dc163e92a674d58fe7d6cd0b4a7b43d7191`.
+- Focused font/OG tests: 2 files / 11 tests passed. A new production deployment is required to confirm the reduced Edge bundle is accepted.
+
 ## Artifact Parity
-This full progress body, including U1, U2, U3a, U3b, U3a-C, and U4 evidence, is persisted identically in `apply-progress.md` and Engram topic `sdd/public-og-results/apply-progress`.
+This full progress body, including U1, U2, U3a, U3b, U3a-C, U4, and the Vercel deployment correction evidence, is persisted identically in `apply-progress.md` and Engram topic `sdd/public-og-results/apply-progress`.
 
 ## Boundary
 Latest correction: U3a-C exact local-font publication coverage and narrow client/API/OG error paths. U1-U4, including expiry remint, remain preserved; no U5 documentation/deployed smoke work, dependency/lockfile changes, local Canvas download contract changes, staging, commits, branches, or PRs. Existing dirty baseline was preserved.
