@@ -1,7 +1,10 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
+  buildResultShareText,
+  buildTelegramShareUrl,
+  buildWhatsAppShareUrl,
   downloadPreparedResultCard,
-  sharePreparedResultCard,
+  shareResultLink,
   type PreparedResultCard,
   type ResultCardData,
 } from './resultImage'
@@ -23,33 +26,33 @@ describe('result sharing', () => {
     vi.unstubAllGlobals()
   })
 
-  it('shares the generated PNG when file sharing is supported', async () => {
+  it('shares only text and the app URL even when file sharing is supported', async () => {
     const share = vi.fn<(shareData: ShareData) => Promise<void>>().mockResolvedValue(undefined)
     const canShare = vi.fn<(shareData: ShareData) => boolean>().mockReturnValue(true)
     installNavigator(share, canShare)
 
-    const result = await sharePreparedResultCard(data, prepared, 'https://duellum.example/')
+    const result = await shareResultLink(data, 'https://duellum.example/')
 
-    expect(result).toBe('shared-image')
-    expect(canShare).toHaveBeenCalledOnce()
+    expect(result).toBe('shared-link')
+    expect(canShare).not.toHaveBeenCalled()
     const payload = share.mock.calls[0]?.[0]
-    expect(payload).toMatchObject({
+    expect(payload).toEqual({
       title: 'Resultado de Plan de fin de semana: Visitar el museo',
       text: 'Visitar el museo ganó en «Plan de fin de semana» con Duellum.',
+      url: 'https://duellum.example/',
     })
-    expect(payload?.files).toHaveLength(1)
-    expect(payload?.files?.[0]?.name).toBe('plan-de-fin-de-semana-resultado.png')
-    expect(payload?.url).toBeUndefined()
+    expect(payload).not.toHaveProperty('files')
   })
 
-  it('shares only Spanish text and the app URL when files are unsupported', async () => {
+  it('shares text and the app URL when file sharing is unsupported', async () => {
     const share = vi.fn<(shareData: ShareData) => Promise<void>>().mockResolvedValue(undefined)
     const canShare = vi.fn<(shareData: ShareData) => boolean>().mockReturnValue(false)
     installNavigator(share, canShare)
 
-    const result = await sharePreparedResultCard(data, prepared, 'https://duellum.example/')
+    const result = await shareResultLink(data, 'https://duellum.example/')
 
     expect(result).toBe('shared-link')
+    expect(canShare).not.toHaveBeenCalled()
     expect(share).toHaveBeenCalledWith({
       title: 'Resultado de Plan de fin de semana: Visitar el museo',
       text: 'Visitar el museo ganó en «Plan de fin de semana» con Duellum.',
@@ -63,7 +66,7 @@ describe('result sharing', () => {
       .mockRejectedValue(new DOMException('Cancelled', 'AbortError'))
     installNavigator(share, vi.fn<(shareData: ShareData) => boolean>().mockReturnValue(true))
 
-    const result = await sharePreparedResultCard(data, prepared, 'https://duellum.example/')
+    const result = await shareResultLink(data, 'https://duellum.example/')
 
     expect(result).toBe('cancelled')
   })
@@ -74,7 +77,7 @@ describe('result sharing', () => {
       .mockRejectedValue(new Error('Share failed'))
     installNavigator(share, vi.fn<(shareData: ShareData) => boolean>().mockReturnValue(true))
 
-    const result = await sharePreparedResultCard(data, prepared, 'https://duellum.example/')
+    const result = await shareResultLink(data, 'https://duellum.example/')
 
     expect(result).toBe('failed')
   })
@@ -83,7 +86,7 @@ describe('result sharing', () => {
     const share = vi.fn<(shareData: ShareData) => Promise<void>>().mockResolvedValue(undefined)
     installNavigator(share, vi.fn<(shareData: ShareData) => boolean>().mockReturnValue(true), false)
 
-    const result = await sharePreparedResultCard(data, prepared, 'https://duellum.example/')
+    const result = await shareResultLink(data, 'https://duellum.example/')
 
     expect(result).toBe('unavailable')
     expect(share).not.toHaveBeenCalled()
@@ -123,6 +126,24 @@ describe('result sharing', () => {
     }
     cleanup()
     expect(revokeObjectURL).toHaveBeenCalledWith(objectUrl)
+  })
+})
+
+describe('direct result sharing URLs', () => {
+  const appUrl = 'https://duellum.example/results?source=share&language=es'
+  const resultText = 'Visitar el museo ganó en «Plan de fin de semana» con Duellum.'
+
+  it('encodes the result text and app URL for WhatsApp', () => {
+    expect(buildResultShareText(data)).toBe(resultText)
+    expect(buildWhatsAppShareUrl(data, appUrl)).toBe(
+      `https://wa.me/?text=${encodeURIComponent(`${resultText} ${appUrl}`)}`,
+    )
+  })
+
+  it('encodes the app URL and result text separately for Telegram', () => {
+    expect(buildTelegramShareUrl(data, appUrl)).toBe(
+      `https://t.me/share/url?url=${encodeURIComponent(appUrl)}&text=${encodeURIComponent(resultText)}`,
+    )
   })
 })
 

@@ -1,13 +1,20 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { BracketHistory } from '../components/BracketHistory'
 import type { TournamentSnapshot } from '../domain/tournament'
 import {
+  buildResultShareText,
+  buildTelegramShareUrl,
+  buildWhatsAppShareUrl,
   downloadPreparedResultCard,
   prepareResultCard,
-  sharePreparedResultCard,
   type PreparedResultCard,
-  type ShareResult,
 } from '../share/resultImage'
+import {
+  ensurePublicResult,
+  isUnsupportedPublicationGlyphsError,
+  publicResultFingerprint,
+  type PublicResult,
+} from '../share/publicResult'
 import type { DecisionBracket } from '../state/appState'
 
 interface ResultScreenProps {
@@ -22,6 +29,10 @@ type PreparationState =
   | { key: string; status: 'ready'; card: PreparedResultCard }
   | { key: string; status: 'failed' }
 
+type PublicSharingState =
+  | { key: string; status: 'idle' | 'preparing' | 'failed' }
+  | { key: string; status: 'ready'; result: PublicResult }
+
 export function ResultScreen({
   bracket,
   snapshot,
@@ -31,11 +42,11 @@ export function ResultScreen({
 }: ResultScreenProps) {
   const [preparation, setPreparation] = useState<PreparationState | null>(null)
   const [feedback, setFeedback] = useState<{ key: string; message: string } | null>(null)
-  const [sharingKey, setSharingKey] = useState<string | null>(null)
+  const [publicSharing, setPublicSharing] = useState<PublicSharingState | null>(null)
   const winner = bracket.options.find((option) => option.id === snapshot.winnerId)
   const winnerId = winner?.id ?? null
   const winnerName = winner?.name ?? ''
-  const resultKey = JSON.stringify([
+  const imageKey = JSON.stringify([
     bracket.id,
     bracket.updatedAt,
     bracket.title,
@@ -43,10 +54,27 @@ export function ResultScreen({
     bracket.options.length,
     snapshot.totalDecisions,
   ])
-  const currentPreparation = preparation?.key === resultKey ? preparation : null
+  const resultData = {
+    bracketTitle: bracket.title,
+    winnerName,
+    optionCount: bracket.options.length,
+    decisionCount: snapshot.totalDecisions,
+  }
+  const publicInput = {
+    title: resultData.bracketTitle,
+    winner: resultData.winnerName,
+    optionCount: resultData.optionCount,
+    decisionCount: resultData.decisionCount,
+  }
+  const resultKey = publicResultFingerprint(publicInput)
+  const currentResultKey = useRef(resultKey)
+  useLayoutEffect(() => {
+    currentResultKey.current = resultKey
+  }, [resultKey])
+  const currentPreparation = preparation?.key === imageKey ? preparation : null
   const preparedResult =
     currentPreparation?.status === 'ready' ? currentPreparation.card : null
-  const sharing = sharingKey === resultKey
+  const currentPublicSharing = publicSharing?.key === resultKey ? publicSharing : undefined
 
   useEffect(() => {
     if (winnerId === null) {
@@ -62,12 +90,13 @@ export function ResultScreen({
     })
       .then((card) => {
         if (active) {
-          setPreparation({ key: resultKey, status: 'ready', card })
+          setPreparation({ key: imageKey, status: 'ready', card })
         }
       })
       .catch(() => {
         if (active) {
-          setPreparation({ key: resultKey, status: 'failed' })
+          setPreparation({ key: imageKey, status: 'failed' })
+          setFeedback((current) => (current?.key === resultKey ? null : current))
         }
       })
 
@@ -77,6 +106,7 @@ export function ResultScreen({
   }, [
     bracket.options.length,
     bracket.title,
+    imageKey,
     resultKey,
     snapshot.totalDecisions,
     winnerId,
@@ -87,33 +117,100 @@ export function ResultScreen({
     return null
   }
 
-  async function shareResult() {
-    if (preparedResult === null) {
+  function preparePublicResult({
+    onReady,
+    onFailure,
+    onStale,
+  }: {
+    onReady?: (result: PublicResult) => void
+    onFailure?: () => void
+    onStale?: () => void
+  } = {}): void {
+    const capturedKey = resultKey
+    setPublicSharing({ key: capturedKey, status: 'preparing' })
+    setFeedback(null)
+    void ensurePublicResult(publicInput).then(
+      (result) => {
+        if (currentResultKey.current !== capturedKey) {
+          onStale?.()
+          return
+        }
+        setPublicSharing({ key: capturedKey, status: 'ready', result })
+        if (onReady === undefined) {
+          setFeedback({ key: capturedKey, message: 'El enlace está listo para compartir.' })
+        } else {
+          onReady(result)
+        }
+      },
+      (error: unknown) => {
+        if (currentResultKey.current !== capturedKey) {
+          onStale?.()
+          return
+        }
+        setPublicSharing({ key: capturedKey, status: 'failed' })
+        setFeedback({ key: capturedKey, message: isUnsupportedPublicationGlyphsError(error) ? 'Este resultado incluye caracteres que no se pueden publicar como imagen. Puedes seguir viéndolo y descargar la imagen local.' : 'No se pudo preparar el enlace. Inténtalo de nuevo.' })
+        onFailure?.()
+      },
+    )
+  }
+
+  function shareResult(): void {
+    if (currentPublicSharing?.status !== 'ready') {
+      if (currentPublicSharing?.status !== 'preparing') preparePublicResult()
       return
     }
 
-    setSharingKey(resultKey)
-    setFeedback(null)
-    try {
-      const result = await sharePreparedResultCard(
-        {
-          bracketTitle: bracket.title,
-          winnerName,
-          optionCount: bracket.options.length,
-          decisionCount: snapshot.totalDecisions,
-        },
-        preparedResult,
-        window.location.href,
-      )
-      setFeedback({ key: resultKey, message: shareMessage(result) })
-    } catch {
+    const capturedKey = resultKey
+    if (typeof navigator.share !== 'function') {
       setFeedback({
-        key: resultKey,
-        message: 'No se pudo compartir el resultado. Descarga la imagen e inténtalo de nuevo.',
+        key: capturedKey,
+        message: 'El menú para compartir no está disponible en este navegador o contexto.',
       })
-    } finally {
-      setSharingKey((current) => (current === resultKey ? null : current))
+      return
     }
+
+    try {
+      const share = navigator.share({
+        title: `Resultado de ${resultData.bracketTitle}: ${resultData.winnerName}`,
+        text: buildResultShareText(resultData),
+        url: currentPublicSharing.result.url,
+      })
+      void share.then(
+        () => {
+          if (currentResultKey.current === capturedKey) {
+            setFeedback({ key: capturedKey, message: 'Resultado compartido.' })
+          }
+        },
+        () => {
+          if (currentResultKey.current === capturedKey) {
+            setFeedback({ key: capturedKey, message: 'Se canceló el proceso de compartir. Puedes intentarlo de nuevo.' })
+          }
+        },
+      )
+    } catch {
+      setFeedback({ key: capturedKey, message: 'No se pudo compartir el resultado. Puedes intentarlo de nuevo.' })
+    }
+  }
+
+  function shareDirect(serviceUrl: (url: string) => string): void {
+    const target = window.open('', '_blank')
+    if (target === null) {
+      setFeedback({ key: resultKey, message: 'No se pudo abrir el servicio para compartir. Inténtalo de nuevo.' })
+      return
+    }
+
+    preparePublicResult({
+      onReady: (result) => {
+        try {
+          target.location.assign(serviceUrl(result.url))
+        } catch {
+          target.close()
+          setFeedback({ key: resultKey, message: 'No se pudo abrir el servicio para compartir. Inténtalo de nuevo.' })
+        }
+      },
+      onFailure: () => target.close(),
+      onStale: () => target.close(),
+    })
   }
 
   function downloadResult() {
@@ -123,7 +220,7 @@ export function ResultScreen({
 
     const result = downloadPreparedResultCard(preparedResult)
     setFeedback({
-      key: resultKey,
+        key: resultKey,
       message:
         result === 'downloaded'
           ? 'Imagen descargada.'
@@ -133,11 +230,17 @@ export function ResultScreen({
 
   const preparationStatus =
     currentPreparation === null
-      ? 'Preparando la imagen del resultado...'
+      ? 'Preparando la imagen para descargarla. Puedes compartir el texto y el enlace mientras tanto.'
       : currentPreparation.status === 'failed'
-        ? 'No se pudo preparar la imagen del resultado. Actualiza la página para volver a intentarlo.'
+        ? 'No se pudo preparar la imagen. Aún puedes compartir el texto y el enlace; actualiza la página para intentar prepararla de nuevo.'
         : null
-  const statusMessage = feedback?.key === resultKey ? feedback.message : preparationStatus
+  const publicPreparationStatus =
+    currentPublicSharing?.status === 'preparing' ? 'Preparando enlace…' : null
+  const statusMessage =
+    feedback?.key === resultKey ? feedback.message : publicPreparationStatus ?? preparationStatus
+  const nativeLabel =
+    currentPublicSharing?.status === 'ready' ? 'Compartir resultado' : 'Preparar enlace'
+  const publicSharingInProgress = currentPublicSharing?.status === 'preparing'
 
   return (
     <main className="view-enter mx-auto w-full max-w-7xl px-5 pt-8 pb-20 sm:px-8 sm:pt-12">
@@ -175,18 +278,32 @@ export function ResultScreen({
       <div className="mt-5 flex flex-col gap-3 sm:flex-row sm:flex-wrap">
         <button
           type="button"
-          onClick={() => void shareResult()}
-          disabled={preparedResult === null || sharing}
-          aria-busy={sharing}
+          onClick={shareResult}
+          disabled={publicSharingInProgress}
+          aria-busy={publicSharingInProgress}
           className="min-h-13 rounded-2xl bg-white px-6 font-black text-ink hover:bg-electric disabled:cursor-wait disabled:opacity-60"
         >
-          Compartir resultado
+          {nativeLabel}
+        </button>
+        <button
+          type="button"
+          onClick={() => shareDirect((url) => buildWhatsAppShareUrl(resultData, url))}
+          className="grid min-h-13 place-items-center rounded-2xl border border-white/15 px-6 font-black text-white hover:bg-white/10"
+        >
+          WhatsApp
+        </button>
+        <button
+          type="button"
+          onClick={() => shareDirect((url) => buildTelegramShareUrl(resultData, url))}
+          className="grid min-h-13 place-items-center rounded-2xl border border-white/15 px-6 font-black text-white hover:bg-white/10"
+        >
+          Telegram
         </button>
         <button
           type="button"
           onClick={downloadResult}
-          disabled={preparedResult === null || sharing}
-          className="min-h-13 rounded-2xl border border-white/15 px-6 font-black text-white hover:bg-white/10 disabled:cursor-wait disabled:opacity-60"
+          disabled={preparedResult === null}
+          className="min-h-13 rounded-2xl border border-white/15 px-6 font-black text-white hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-60"
         >
           Descargar imagen
         </button>
@@ -206,8 +323,8 @@ export function ResultScreen({
         </button>
       </div>
       <p className="mt-4 max-w-2xl text-sm leading-6 text-slate-400">
-        En móviles compatibles se abrirán tus aplicaciones instaladas. También puedes descargar la
-        imagen en cualquier dispositivo.
+        Comparte el resultado como texto y enlace mediante el menú del navegador, WhatsApp o
+        Telegram. La imagen no se adjunta: descárgala por separado.
       </p>
       <p className="mt-3 min-h-6 text-sm text-slate-400" role="status" aria-live="polite">
         {statusMessage}
@@ -216,19 +333,4 @@ export function ResultScreen({
       <BracketHistory options={bracket.options} snapshot={snapshot} />
     </main>
   )
-}
-
-function shareMessage(result: ShareResult): string {
-  switch (result) {
-    case 'shared-image':
-      return 'Resultado compartido con la imagen adjunta.'
-    case 'shared-link':
-      return 'Se compartieron el mensaje y el enlace. La imagen no se adjuntó; puedes descargarla por separado.'
-    case 'cancelled':
-      return 'Se canceló el proceso de compartir.'
-    case 'unavailable':
-      return 'Compartir no está disponible en este navegador o contexto. Descarga la imagen para publicarla manualmente.'
-    case 'failed':
-      return 'No se pudo compartir el resultado. Descarga la imagen e inténtalo de nuevo.'
-  }
 }

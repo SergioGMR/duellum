@@ -11,7 +11,6 @@ export interface PreparedResultCard {
 }
 
 export type ShareResult =
-  | 'shared-image'
   | 'shared-link'
   | 'cancelled'
   | 'unavailable'
@@ -27,32 +26,37 @@ export async function prepareResultCard(data: ResultCardData): Promise<PreparedR
   }
 }
 
-export async function sharePreparedResultCard(
-  data: ResultCardData,
-  prepared: PreparedResultCard,
-  appUrl: string,
-): Promise<ShareResult> {
+export async function shareResultLink(data: ResultCardData, appUrl: string): Promise<ShareResult> {
   if (!canUseNativeShare()) {
     return 'unavailable'
   }
 
-  const file = createShareFile(prepared)
-  const supportsFileShare = file !== null && canShareFile(file)
   const title = `Resultado de ${data.bracketTitle}: ${data.winnerName}`
-  const text = `${data.winnerName} ganó en «${data.bracketTitle}» con Duellum.`
-  const shareData: ShareData = supportsFileShare
-    ? { title, text, files: [file] }
-    : { title, text, url: appUrl }
+  const text = buildResultShareText(data)
+  const shareData: ShareData = { title, text, url: appUrl }
 
   try {
     await navigator.share(shareData)
-    return supportsFileShare ? 'shared-image' : 'shared-link'
+    return 'shared-link'
   } catch (error) {
     if (isCancellation(error)) {
       return 'cancelled'
     }
     return 'failed'
   }
+}
+
+export function buildResultShareText(data: ResultCardData): string {
+  return `${data.winnerName} ganó en «${data.bracketTitle}» con Duellum.`
+}
+
+export function buildWhatsAppShareUrl(data: ResultCardData, appUrl: string): string {
+  const message = `${buildResultShareText(data)} ${appUrl}`
+  return `https://wa.me/?text=${encodeURIComponent(message)}`
+}
+
+export function buildTelegramShareUrl(data: ResultCardData, appUrl: string): string {
+  return `https://t.me/share/url?url=${encodeURIComponent(appUrl)}&text=${encodeURIComponent(buildResultShareText(data))}`
 }
 
 export function downloadPreparedResultCard(prepared: PreparedResultCard): DownloadResult {
@@ -241,18 +245,6 @@ function isCancellation(error: unknown): boolean {
   )
 }
 
-function canShareFile(file: File): boolean {
-  try {
-    return (
-      typeof navigator.share === 'function' &&
-      typeof navigator.canShare === 'function' &&
-      navigator.canShare({ files: [file] })
-    )
-  } catch {
-    return false
-  }
-}
-
 function canUseNativeShare(): boolean {
   try {
     return (
@@ -262,16 +254,5 @@ function canUseNativeShare(): boolean {
     )
   } catch {
     return false
-  }
-}
-
-function createShareFile(prepared: PreparedResultCard): File | null {
-  try {
-    if (typeof File !== 'function') {
-      return null
-    }
-    return new File([prepared.blob], prepared.fileName, { type: 'image/png' })
-  } catch {
-    return null
   }
 }
