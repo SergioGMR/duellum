@@ -1,0 +1,7 @@
+{
+  "rewrites": [
+    { "source": "/r/:token/og.png", "destination": "/api/public-result-og" },
+    { "source": "/r/:token", "destination": "/api/public-result" },
+    { "source": "/(.*)", "destination": "/index.html" }
+  ]
+}
