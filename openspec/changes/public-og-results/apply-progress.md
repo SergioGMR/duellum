@@ -159,7 +159,8 @@
 - Added root `pnpm-workspace.yaml` with `allowBuilds.sharp: true`; `pnpm install --frozen-lockfile` and the full check pass locally.
 - The next deployment reached the Edge bundle but exceeded the Hobby 1 MB limit at 1.13 MB because the two full Inter TTFs were bundled. Replaced them with exact curated Latin/punctuation subsets while retaining cmap-derived coverage rejection and no remote fallback.
 - New asset proof: `Inter-Regular.ttf` 189,664 bytes, SHA-256 `a36932026a9def9774fd9cab8a26c36b03aa2989adb549ba68e88d0f4769de83`; `Inter-Black.ttf` 192,240 bytes, SHA-256 `2281ecc1ecc64a63d7e20ac365692dc163e92a674d58fe7d6cd0b4a7b43d7191`.
-- Focused font/OG tests: 2 files / 11 tests passed. A new production deployment is required to confirm the reduced Edge bundle is accepted.
+- The first successful bundle also exposed API test files as deployable functions; `.vercelignore` now excludes `api/**/*.test.ts` and `api/**/*.test.tsx`. Local `vercel build --prod` produces only the three production API functions.
+- Focused font/OG tests: 2 files / 11 tests passed. Production deployment `duellum-apw0mzaha` reached `Ready`; a new deployment is required to confirm the test-function exclusion.
 
 ## Artifact Parity
 This full progress body, including U1, U2, U3a, U3b, U3a-C, U4, and the Vercel deployment correction evidence, is persisted identically in `apply-progress.md` and Engram topic `sdd/public-og-results/apply-progress`.
